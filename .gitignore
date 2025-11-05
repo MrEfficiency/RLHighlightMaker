@@ -1,0 +1,27 @@
+# Visual Studio
+.vs/
+*.suo
+*.user
+*.vcxproj.user
+
+# Build outputs
+[Bb]uild/
+[Rr]elease/
+[Dd]ebug/
+x64/
+Win32/
+*.obj
+*.pdb
+*.ilk
+*.sdf
+*.VC.db
+ipch/
+
+# Plugin outputs
+plugins/
+
+# Executables and libraries
+*.dll
+*.lib
+*.exe
+*.exp
