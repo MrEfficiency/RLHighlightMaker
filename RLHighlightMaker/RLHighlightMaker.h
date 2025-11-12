@@ -13,6 +13,11 @@
 #include <memory>
 #include <functional>
 
+#include "bakkesmod/wrappers/wrapperstructs.h"
+#include <string>
+#include <vector>
+#include <algorithm>
+
 constexpr auto plugin_version = stringify(VERSION_MAJOR) "." stringify(VERSION_MINOR) "." stringify(VERSION_PATCH) "." stringify(VERSION_BUILD);
 
 
@@ -28,6 +33,10 @@ private:
 	void stopServer();
 
 	void executeOnGameThread(std::function<void(GameWrapper*)> func);
+
+	std::vector<PriWrapper> GetSortedTeamMembers(int teamNum);
+	static bool SortPRIsAlphabetically(PriWrapper& _priA, PriWrapper& _priB);
+	static std::string StringToLowerCase(const std::string& str);
 
 	//Boilerplate
 	void onLoad() override;

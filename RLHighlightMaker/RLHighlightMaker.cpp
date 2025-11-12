@@ -139,6 +139,24 @@ void RLHighlightMaker::startServer()
 		}
 	});
 
+	svr->Post("/replay/seek_time", [this](const httplib::Request& req, httplib::Response& res) {
+		try {
+			json body = json::parse(req.body);
+			float time = body.at("time");
+			executeOnGameThread([this, time](GameWrapper* gw) {
+				if (!gw->IsInReplay()) return;
+				auto replayWrapper = gw->GetGameEventAsReplay();
+				if (!replayWrapper) return;
+				replayWrapper.SkipToTime(time);
+				});
+			res.set_content("{\"status\": \"seeked_time\"}", "application/json");
+		}
+		catch (json::exception& e) {
+			res.status = 400;
+			res.set_content(std::string("{\"error\": \"Malformed JSON: ") + e.what() + "\"}", "application/json");
+		}
+	});
+
 	svr->Post("/replay/slomo", [this](const httplib::Request& req, httplib::Response& res) {
 		try {
 			json body = json::parse(req.body);
@@ -256,6 +274,81 @@ void RLHighlightMaker::startServer()
 			res.set_content("{\"error\": \"Internal server error: " + std::string(e.what()) + "\"}", "application/json");
 		}
 	});
+
+	svr->Get("/replay/playback_info", [this](const httplib::Request& req, httplib::Response& res) {
+		std::promise<json> promise;
+		std::future<json> future = promise.get_future();
+
+		executeOnGameThread([this, &promise](GameWrapper* gw) {
+			if (!gw->IsInReplay()) {
+				promise.set_value({
+					{"error", "Not in a replay"}
+					});
+				return;
+			}
+			auto replayServer = gw->GetGameEventAsReplay();
+			if (!replayServer) {
+				promise.set_value({
+					{"error", "Could not get replay server"}
+					});
+				return;
+			}
+
+			json playbackInfo;
+			playbackInfo["time_elapsed"] = replayServer.GetReplayTimeElapsed();
+			playbackInfo["fps"] = replayServer.GetReplayFPS();
+			playbackInfo["current_frame"] = replayServer.GetCurrentReplayFrame();
+			promise.set_value(playbackInfo);
+			});
+
+		json result = future.get();
+		if (result.count("error")) {
+			res.status = 404;
+		}
+		res.set_content(result.dump(), "application/json");
+	});
+
+	svr->Get("/replay/player_map", [this](const httplib::Request& req, httplib::Response& res) {
+		std::promise<json> promise;
+		std::future<json> future = promise.get_future();
+
+		executeOnGameThread([this, &promise, &res](GameWrapper* gw) {
+			if (!gw->IsInReplay()) {
+				res.status = 404;
+				promise.set_value({ {"error", "Not in a replay"} });
+				return;
+			}
+
+			json player_map;
+
+			for (int team_idx = 0; team_idx < 2; ++team_idx) {
+				std::vector<PriWrapper> team_members = GetSortedTeamMembers(team_idx);
+				for (int player_idx = 0; player_idx < team_members.size(); ++player_idx) {
+					PriWrapper player_pri = team_members[player_idx];
+					if (player_pri) {
+						std::string player_name = player_pri.GetPlayerName().ToString();
+						player_map[player_name] = {
+							{"team", team_idx},
+							{"index", player_idx}
+						};
+					}
+				}
+			}
+			promise.set_value(player_map);
+			});
+
+		try {
+			json player_map_json = future.get();
+			if (player_map_json.count("error")) {
+				// Status is set inside the lambda
+			}
+			res.set_content(player_map_json.dump(), "application/json");
+		}
+		catch (const std::exception& e) {
+			res.status = 500;
+			res.set_content("{\"error\": \"Internal server error: " + std::string(e.what()) + "\"}", "application/json");
+		}
+	});
 	
 	svr->Post("/camera/player", [this](const httplib::Request& req, httplib::Response& res) {
 		try {
@@ -338,4 +431,43 @@ void RLHighlightMaker::stopServer()
 	if (server_thread.joinable()) {
 		server_thread.join();
 	}
+}
+
+std::string RLHighlightMaker::StringToLowerCase(const std::string& str)
+{
+	std::string result;
+	for (char c : str) {
+		result += std::tolower(c);
+	}
+	return result;
+}
+
+bool RLHighlightMaker::SortPRIsAlphabetically(PriWrapper& _priA, PriWrapper& _priB)
+{
+	return StringToLowerCase(_priA.GetPlayerName().ToString()) < StringToLowerCase(_priB.GetPlayerName().ToString());
+}
+
+std::vector<PriWrapper> RLHighlightMaker::GetSortedTeamMembers(int teamNum)
+{
+	std::vector<PriWrapper> teamMembers;
+	if (!gameWrapper->IsInReplay()) return teamMembers;
+
+	ServerWrapper server = gameWrapper->GetCurrentGameState();
+	if (!server)
+	{
+		return teamMembers;
+	}
+
+	for (PriWrapper pri : server.GetPRIs())
+	{
+		if (!pri) continue;
+
+		if (pri.GetTeamNum2() == teamNum)
+		{
+			teamMembers.emplace_back(pri);
+		}
+	}
+
+	std::sort(teamMembers.begin(), teamMembers.end(), SortPRIsAlphabetically);
+	return teamMembers;
 }
